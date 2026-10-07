@@ -24,6 +24,8 @@ function Auth({ onLogin }) {
   const [mode, setMode] = useState("login");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
   const [form, setForm] = useState({ username: "", email: "", first_name: "", last_name: "", password: "", password_confirm: "" });
 
   const update = (event) => setForm({ ...form, [event.target.name]: event.target.value });
@@ -59,11 +61,10 @@ function Auth({ onLogin }) {
         {mode === "register" && <div className="form-grid compact">
           <Field label="First name"><input name="first_name" value={form.first_name} onChange={update} required /></Field>
           <Field label="Last name"><input name="last_name" value={form.last_name} onChange={update} required /></Field>
-          <Field label="Email" full><input type="email" name="email" value={form.email} onChange={update} required /></Field>
-        </div>}
-        <Field label="Username"><input name="username" value={form.username} onChange={update} required autoComplete="username" /></Field>
-        <Field label="Password"><input type="password" name="password" value={form.password} onChange={update} required autoComplete={mode === "login" ? "current-password" : "new-password"} /></Field>
-        {mode === "register" && <Field label="Confirm password"><input type="password" name="password_confirm" value={form.password_confirm} onChange={update} required /></Field>}
+          <Field label="Email" full><input type="email" name="email" value={form.email} onChange={update} required /></Field></div>}
+          <Field label="Username"><input name="username" value={form.username} onChange={update} required autoComplete="username" /></Field>
+          <Field label="Password"><div className="password-input"><input type={showPassword ? "text" : "password"} name="password" value={form.password} onChange={update} required autoComplete={mode === "login" ? "current-password" : "new-password"} /><button type="button" className="password-toggle" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Hide password" : "Show password"} title={showPassword ? "Hide password" : "Show password"}><Icon name={showPassword ? "eyeOff" : "eye"} size={19} /></button></div></Field>
+        {mode === "register" && <Field label="Confirm password"><div className="password-input"><input type={showPasswordConfirm ? "text" : "password"} name="password_confirm" value={form.password_confirm} onChange={update} required autoComplete="new-password" /><button type="button" className="password-toggle" onClick={() => setShowPasswordConfirm(!showPasswordConfirm)} aria-label={showPasswordConfirm ? "Hide password" : "Show password"} title={showPasswordConfirm ? "Hide password" : "Show password"}><Icon name={showPasswordConfirm ? "eyeOff" : "eye"} size={19} /></button></div></Field>}
         <button className="primary wide" disabled={loading}>{loading ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}<Icon name="arrow" /></button>
         <div className="switch">{mode === "login" ? "New to GradApp?" : "Already have an account?"} <button type="button" onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }}>{mode === "login" ? "Create account" : "Sign in"}</button></div>
       </form>
