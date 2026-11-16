@@ -3,6 +3,25 @@ import { Alert, Field } from "../components/ui";
 import { useAuth } from "../context";
 import { Icon } from "../icons";
 
+/** Password input with a show/hide toggle. */
+function PasswordInput({ name, value, onChange, autoComplete }) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div className="password-input">
+      <input type={visible ? "text" : "password"} name={name} value={value} onChange={onChange} required autoComplete={autoComplete} />
+      <button
+        type="button"
+        className="password-toggle"
+        onClick={() => setVisible(!visible)}
+        aria-label={visible ? "Hide password" : "Show password"}
+        aria-pressed={visible}
+      >
+        <Icon name={visible ? "eyeOff" : "eye"} size={18} />
+      </button>
+    </div>
+  );
+}
+
 const EMPTY = { username: "", email: "", first_name: "", last_name: "", password: "", password_confirm: "" };
 
 export default function AuthPage() {
@@ -59,9 +78,9 @@ export default function AuthPage() {
             </div>
           )}
           <Field label="Username"><input name="username" value={form.username} onChange={update} required autoComplete="username" /></Field>
-          <Field label="Password"><input type="password" name="password" value={form.password} onChange={update} required autoComplete={isLogin ? "current-password" : "new-password"} /></Field>
+          <Field label="Password"><PasswordInput name="password" value={form.password} onChange={update} autoComplete={isLogin ? "current-password" : "new-password"} /></Field>
           {!isLogin && (
-            <Field label="Confirm password"><input type="password" name="password_confirm" value={form.password_confirm} onChange={update} required autoComplete="new-password" /></Field>
+            <Field label="Confirm password"><PasswordInput name="password_confirm" value={form.password_confirm} onChange={update} autoComplete="new-password" /></Field>
           )}
           <button className="primary wide" disabled={loading}>
             {loading ? "Please wait…" : isLogin ? "Sign in" : "Create account"}<Icon name="arrow" />

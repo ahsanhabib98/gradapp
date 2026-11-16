@@ -65,7 +65,7 @@ Every error uses the same shape, with a readable `message` for the UI:
 ## Management commands
 
 ```bash
-python manage.py seed_programs                 # fictional sample dataset (idempotent)
+python manage.py seed_programs                 # verified real starter data (idempotent)
 python manage.py retrieve_programs 3 5         # retrieve specific programs
 python manage.py retrieve_programs --stale     # retrieve missing or >90-day-old information
 python manage.py retrieve_programs --all --dry-run
@@ -90,7 +90,8 @@ python manage.py retrieve_programs --all --dry-run
 | `AI_WEB_SEARCH_TIMEOUT_SECONDS` | `90` | Time limit for one web search |
 | `THROTTLE_AUTH` / `THROTTLE_AI` | `20/min` / `30/hour` | Rate limits |
 | `RETRIEVAL_STALE_AFTER_DAYS` | `90` | When program information is flagged stale |
-| `SEED_SAMPLE_DATA` | `false` | Docker entrypoint loads sample data when `true` |
+| `SEED_SAMPLE_DATA` | `false` | Docker entrypoint loads the verified real starter data when `true` |
+| `AI_REQUIRE_LIVE_LINKS` | `true` | Only save web-search results whose official links load |
 | `DJANGO_SUPERUSER_*` | empty | Docker entrypoint creates an administrator |
 
 ## Local development

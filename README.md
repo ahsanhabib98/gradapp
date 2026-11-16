@@ -22,8 +22,8 @@ docker compose up --build
 - API: http://localhost:8000/api/
 - Data admin (Django admin): http://localhost:8000/admin/
 
-With the defaults in `.env.example`, the backend applies migrations, loads the **fictional sample
-dataset**, and creates an administrator account from `DJANGO_SUPERUSER_*`. Sign in with that
+With the defaults in `.env.example`, the backend applies migrations, loads GradApp's **verified real
+starter data**, and creates an administrator account from `DJANGO_SUPERUSER_*`. Sign in with that
 account to see the administrator features (Manage Users, Retrieve Program Information).
 
 Stop with `docker compose down` (add `--volumes` to delete the database).
@@ -102,12 +102,24 @@ Recommendations score **fit, not admission chances**. Each score is broken down 
 plain-language reason or caution. AI answers are grounded in database records to limit hallucination,
 and the UI always links to the source records and official sites.
 
-## Sample data
+## Starter data (real, verified)
 
-`manage.py seed_programs` loads 6 fictional universities (all labelled "(Sample)"), 14 programs,
-16 faculty and 11 funding opportunities. Deadlines are generated relative to today, so the demo
-never goes stale. **No real people or institutions are represented.** Set `SEED_SAMPLE_DATA=false`
-and add real records through the data admin when you move to real data.
+`manage.py seed_programs` loads real records copied from official university and funder pages and checked
+on November 16, 2026:
+
+- **9 programs** at Texas A&M University-Corpus Christi, the University of Houston, UT Dallas and UT Austin
+  (MS and PhD in Computer Science, MS/PhD in Software Engineering, MS in Statistics & Data Science)
+- **20 faculty** from official department research pages, linked to their programs
+- **3 funding opportunities**: NSF Graduate Research Fellowship, Fulbright Foreign Student Program, and UT Dallas
+  CS teaching assistantships
+
+Every link points to the official page the facts came from. Facts an official page did not state (often tuition)
+are left empty rather than estimated. Running the command also removes the fictional "(Sample)" records created
+by earlier versions. Deadlines change every year, so records show "Verified over 90 days ago" once they need a
+recheck. Set `SEED_SAMPLE_DATA=false` to skip loading this data.
+
+When Ask AI finds new programs, faculty or funding on the web, it saves them only if the link is on the
+university's (or funder's) own website, is not a rankings/aggregator site, and actually loads.
 
 ## Development without Docker
 

@@ -8,11 +8,16 @@ found into GradApp so the next student gets them from the database.
 Safeguards:
 * Only facts stated in the cited answer are extracted; nothing is guessed.
 * Every saved record must point to one of the URLs the search actually cited.
+* Links must be OFFICIAL and WORKING: a program, faculty member or university
+  funding record is saved only if its source page is on that university's own
+  website (not an aggregator such as a rankings or study-abroad site), and
+  every saved link is checked to load before it is stored.
 * Saved records are marked ``origin=web`` and ``needs_review=True`` and are shown
   as "not yet reviewed" until an administrator approves them.
 * Existing records are never modified by web search; only new ones are added.
 """
 
+import ipaddress
 import json
 import logging
 import re
@@ -20,6 +25,8 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlparse
 
+import requests
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
@@ -36,7 +43,8 @@ SEARCH_INSTRUCTIONS = """You help prospective graduate students research graduat
 Search the web and answer the student's question about graduate programs, admission requirements,
 tuition, deadlines, funding/scholarships/assistantships, or faculty and research advisors.
 Rules:
-- Prefer official university and department websites (.edu or the university's own domain).
+- Use and cite the OFFICIAL university or department website (the university's own domain, e.g. uh.edu)
+  or the funder's own website. Do not rely on rankings, study-abroad or aggregator sites.
 - Give concrete facts when available: program name, degree level, university and city, tuition per year,
   application deadline, minimum GPA, funding, and professors with their research areas.
 - Cite your sources.
@@ -68,7 +76,9 @@ Return ONLY a JSON object with this shape (use [] or null when not stated; never
 }
 Rules:
 - Include only records the answer text explicitly describes. A program needs a university and program name.
-- "source_url" MUST be copied exactly from the numbered source list provided. Skip a record if no listed source supports it.
+- "source_url" MUST be copied exactly from the numbered source list provided, and must be a page on the
+  university's (or funder's) OWN website. Skip a record if only third-party sites support it.
+- "university_website" is the university's official home page (e.g. https://www.uh.edu/), or null.
 - Numbers are digits only (no $ or commas). Dates must be explicit in the text; otherwise null."""
 
 _MD_LINK_PAREN_RE = re.compile(r"\s*\(\[([^\]]+)\]\((https?://[^)\s]+)\)\)")
@@ -132,6 +142,109 @@ def _site_root(url):
     return f"{parsed.scheme}://{parsed.netloc}/" if parsed.scheme and parsed.netloc else ""
 
 
+# --------------------------------------------------------------------------
+# Official, working links
+# --------------------------------------------------------------------------
+
+# Rankings, study-abroad, social and other third-party sites are never saved as official links.
+AGGREGATOR_DOMAINS = {
+    "collegedunia.com", "yocket.com", "shiksha.com", "leverageedu.com", "gyandhan.com", "uni4edu.com",
+    "studee.com", "studyportals.com", "mastersportal.com", "phdportal.com", "petersons.com", "usnews.com",
+    "niche.com", "gradschools.com", "topuniversities.com", "timeshighereducation.com", "collegevine.com",
+    "collegeboard.org", "unigo.com", "scholars4dev.com", "scholarshipsads.com", "opportunitydesk.org",
+    "globalscholarships.com", "scholarshipscentral.com", "applysquare.com", "idp.com", "edvoy.com",
+    "gradright.com", "upgrad.com", "canamgroup.com", "kaplaninternational.com", "wikipedia.org",
+    "linkedin.com", "facebook.com", "instagram.com", "x.com", "twitter.com", "youtube.com", "reddit.com",
+    "quora.com", "medium.com", "glassdoor.com", "indeed.com", "ratemyprofessors.com", "researchgate.net",
+    "google.com", "googleusercontent.com", "github.io", "blogspot.com", "wordpress.com",
+}
+_SECOND_LEVEL = {"ac", "edu", "co", "gov", "org", "com", "net"}
+
+
+def registrable_domain(url):
+    """``https://www.cs.uh.edu/x`` -> ``uh.edu``; ``https://www.ox.ac.uk`` -> ``ox.ac.uk``."""
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    if not host:
+        return ""
+    try:
+        ipaddress.ip_address(host)
+        return ""  # raw IP addresses are never official links
+    except ValueError:
+        pass
+    parts = host.split(".")
+    if len(parts) >= 3 and parts[-2] in _SECOND_LEVEL and len(parts[-1]) == 2:
+        return ".".join(parts[-3:])
+    return ".".join(parts[-2:])
+
+
+def is_aggregator(url):
+    domain = registrable_domain(url)
+    host = (urlparse(url).hostname or "").lower()
+    return not domain or domain in AGGREGATOR_DOMAINS or any(host.endswith("." + d) for d in AGGREGATOR_DOMAINS)
+
+
+def link_is_live(url):
+    """True if the page loads (follows redirects). Bot-blocking responses count as live."""
+    if not settings.AI_REQUIRE_LIVE_LINKS:
+        return True
+    from programs.retrieval import RetrievalBlocked, validate_public_url
+
+    try:
+        validate_public_url(url)
+        headers = {"User-Agent": settings.RETRIEVAL_USER_AGENT}
+        response = requests.head(url, headers=headers, allow_redirects=True, timeout=8)
+        if response.status_code in (405, 501):  # HEAD not allowed: try GET
+            response = requests.get(url, headers=headers, allow_redirects=True, timeout=8, stream=True)
+            response.close()
+    except (RetrievalBlocked, requests.RequestException, ValueError):
+        return False
+    return response.status_code < 400 or response.status_code in (401, 403, 429)
+
+
+def official_university_website(item, source):
+    """The university's official home page on the same domain as ``source``."""
+    domain = registrable_domain(source)
+    candidate = str(item.get("university_website") or "")
+    if candidate.startswith(("http://", "https://")) and registrable_domain(candidate) == domain and link_is_live(candidate):
+        return candidate
+    for guess in (f"https://www.{domain}/", f"https://{domain}/"):
+        if link_is_live(guess):
+            return guess
+    return _site_root(source)
+
+
+def is_academic_domain(domain):
+    """uh.edu, ox.ac.uk, unimelb.edu.au ... (other countries' universities are checked via their website)."""
+    return domain.endswith(".edu") or ".edu." in domain or ".ac." in domain
+
+
+def official_source(item, allowed_urls, university=None, institutional=True):
+    """Return the record's cited source if it is an official, working page, else ``None``.
+
+    * Institutional records (programs, faculty, a university's own funding) must come from
+      the university's own domain. If the university is already in GradApp, its stored
+      website decides the domain; otherwise the source must be an academic domain (.edu,
+      .ac.xx) or match the official website the answer gave for the university.
+    * External funding (e.g. a national fellowship) must come from the funder's site,
+      which may not be a rankings/aggregator/social site.
+    """
+    source = llm.clean_url(item.get("source_url") or "")
+    if source not in allowed_urls or is_aggregator(source):
+        return None
+    domain = registrable_domain(source)
+    if institutional:
+        if university is not None:
+            if domain != registrable_domain(university.website_url):
+                return None
+        else:
+            website = str(item.get("university_website") or "")
+            if not (is_academic_domain(domain) or (website and registrable_domain(website) == domain)):
+                return None
+    if not link_is_live(source):
+        return None
+    return source
+
+
 def _get_or_create_university(data, source_url):
     name = _text(data.get("university"))
     if not name:
@@ -139,9 +252,7 @@ def _get_or_create_university(data, source_url):
     university = University.objects.filter(name__iexact=name).first()
     if university:
         return university
-    website = data.get("university_website") or _site_root(source_url)
-    if not str(website).startswith(("http://", "https://")):
-        website = _site_root(source_url)
+    website = official_university_website(data, source_url)
     return University.objects.create(
         name=name,
         city=_text(data.get("city"), 120) or "Unknown",
@@ -157,9 +268,10 @@ def _save_records(data, allowed_urls):
     now = timezone.now()
 
     for item in (data.get("programs") or [])[:MAX_SAVED_PER_TYPE]:
-        source = llm.clean_url(item.get("source_url") or "")
         name = _text(item.get("name"))
-        if source not in allowed_urls or not name:
+        existing = University.objects.filter(name__iexact=_text(item.get("university"))).first()
+        source = official_source(item, allowed_urls, existing)
+        if not source or not name or not item.get("university"):
             continue
         university = _get_or_create_university(item, source)
         if not university:
@@ -189,9 +301,11 @@ def _save_records(data, allowed_urls):
                       "saved": True, "created": created})
 
     for item in (data.get("funding") or [])[:MAX_SAVED_PER_TYPE]:
-        source = llm.clean_url(item.get("source_url") or "")
         name = _text(item.get("name"))
-        if source not in allowed_urls or not name:
+        has_university = bool(item.get("university"))
+        existing = University.objects.filter(name__iexact=_text(item.get("university"))).first() if has_university else None
+        source = official_source(item, allowed_urls, existing, institutional=has_university)
+        if not source or not name:
             continue
         university = _get_or_create_university(item, source) if item.get("university") else None
         funding = FundingOpportunity.objects.filter(name__iexact=name, university=university).first()
@@ -220,9 +334,10 @@ def _save_records(data, allowed_urls):
                       "url": funding.url, "saved": True, "created": created})
 
     for item in (data.get("faculty") or [])[:MAX_SAVED_PER_TYPE]:
-        source = llm.clean_url(item.get("source_url") or "")
         name = _text(item.get("name"), 180)
-        if source not in allowed_urls or not name:
+        existing = University.objects.filter(name__iexact=_text(item.get("university"))).first()
+        source = official_source(item, allowed_urls, existing)
+        if not source or not name or not item.get("university"):
             continue
         university = _get_or_create_university(item, source)
         if not university:

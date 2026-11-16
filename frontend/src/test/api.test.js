@@ -74,3 +74,13 @@ describe("api", () => {
     await expect(api("/programs/")).rejects.toThrow(/Cannot reach the GradApp server/);
   });
 });
+
+describe("isSampleUrl", async () => {
+  const { isSampleUrl } = await import("../components/ui");
+  it("detects fictional sample domains only", () => {
+    expect(isSampleUrl("https://www.gulfcoast-state.example/graduate/cs-ms")).toBe(true);
+    expect(isSampleUrl("https://www.uh.edu/cs/ms")).toBe(false);
+    expect(isSampleUrl("")).toBe(false);
+    expect(isSampleUrl("not a url")).toBe(false);
+  });
+});

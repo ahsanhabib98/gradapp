@@ -1,211 +1,439 @@
-"""Create a repeatable SAMPLE dataset for development and demos.
+"""Load GradApp's starter data: REAL graduate programs, faculty and funding.
 
-All universities, programs, people and funding below are fictional and are
-marked as sample data. Real program information should be added by
-administrators and kept current with the ``retrieve_programs`` command.
-Deadlines are generated relative to today so the demo never goes stale.
+Every record below was copied from the official page in its URL field and
+checked on ``VERIFIED_ON``. Facts the official pages did not state (often
+tuition) are left empty rather than estimated, and no record uses a placeholder
+web address.
+
+Running the command also removes the fictional sample records that earlier
+versions of GradApp created (universities ending in "(Sample)").
+
+Deadlines and requirements change every year: the "last verified" badge turns
+into a warning after 90 days. Refresh records with ``retrieve_programs``, the
+data admin, or by asking the AI assistant (which saves new official pages).
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, time
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.utils import timezone
 
 from programs.models import Faculty, FundingOpportunity, GraduateProgram, University
 
 
-SAMPLE_NOTE = "Sample data for demonstration only."
+VERIFIED_ON = date(2026, 11, 16)
 
 UNIVERSITIES = [
-    {"key": "gcsu", "name": "Gulf Coast State University (Sample)", "city": "Corpus Christi", "state_or_region": "Texas", "country": "United States", "website_url": "https://www.gulfcoast-state.example/"},
-    {"key": "lsit", "name": "Lone Star Institute of Technology (Sample)", "city": "Austin", "state_or_region": "Texas", "country": "United States", "website_url": "https://www.lonestar-tech.example/"},
-    {"key": "pru", "name": "Pacific Ridge University (Sample)", "city": "San Diego", "state_or_region": "California", "country": "United States", "website_url": "https://www.pacificridge.example/"},
-    {"key": "hvu", "name": "Harborview University (Sample)", "city": "Boston", "state_or_region": "Massachusetts", "country": "United States", "website_url": "https://www.harborview.example/"},
-    {"key": "glu", "name": "Great Lakes Metropolitan University (Sample)", "city": "Chicago", "state_or_region": "Illinois", "country": "United States", "website_url": "https://www.greatlakes-metro.example/"},
-    {"key": "mlis", "name": "Maple Leaf Institute of Science (Sample)", "city": "Toronto", "state_or_region": "Ontario", "country": "Canada", "website_url": "https://www.mapleleaf-science.example/"},
+    {"key": "tamucc", "name": "Texas A&M University-Corpus Christi", "city": "Corpus Christi", "state_or_region": "Texas", "country": "United States", "website_url": "https://www.tamucc.edu/"},
+    {"key": "uh", "name": "University of Houston", "city": "Houston", "state_or_region": "Texas", "country": "United States", "website_url": "https://www.uh.edu/"},
+    {"key": "utd", "name": "The University of Texas at Dallas", "city": "Richardson", "state_or_region": "Texas", "country": "United States", "website_url": "https://www.utdallas.edu/"},
+    {"key": "ut", "name": "The University of Texas at Austin", "city": "Austin", "state_or_region": "Texas", "country": "United States", "website_url": "https://www.utexas.edu/"},
 ]
 
-# (key, university, name, degree, field, department, tuition, min_gpa, funding, deadline_in_days, description, requirements, funding_details)
+UH_CS_ADMISSIONS = "https://www.uh.edu/nsm/computer-science/graduate/admissions/"
+UTD_CS_CATALOG = "https://catalog.utdallas.edu/2026/graduate/programs/ecs/computer-science"
+UTD_SE_CATALOG = "https://catalog.utdallas.edu/2026/graduate/programs/ecs/software-engineering"
+UT_CS_APPLY = "https://www.cs.utexas.edu/graduate/apply"
+
+UH_CS_DEADLINES = (
+    "Deadlines: fall - January 15 (international) and June 1 (U.S. citizens/permanent residents); "
+    "spring - October 1 (all applicants). "
+)
+UT_CS_REQUIREMENTS = (
+    "Application opens October 15; deadline December 15; recommendation letters due December 20. "
+    "Bachelor's degree with a GPA of at least 3.0 on a 4.0 scale in upper-division and graduate coursework. "
+    "At least three letters of recommendation and a statement of purpose. GRE optional (not submitting it "
+    "does not count against you). Apply through the UT Austin Graduate School application and MyStatus. "
+)
+UTD_MS_REQUIREMENTS = (
+    "Deadlines: fall - May 1, spring - October 1, summer - March 1. A bachelor's degree with two semesters "
+    "of calculus, one of linear algebra and a strong programming foundation. GPA of at least 3.0 in the last "
+    "60 semester credit hours and at least 3.3 in quantitative courses. GRE optional (if submitted, 308 "
+    "combined with 153 verbal, 155 quantitative and 4 analytical writing is advisable). One letter of "
+    "recommendation and a statement of purpose. TOEFL iBT 80 for international applicants."
+)
+
+# key, university, fields...
 PROGRAMS = [
-    ("gcsu-cs-ms", "gcsu", "Computer Science", "masters", "Computer Science", "Department of Computing Sciences", 18000, "3.00", True, 75,
-     "Thesis and non-thesis tracks in software engineering, machine learning, cybersecurity and data systems.",
-     "Bachelor's degree in computing or related field; GPA 3.0; statement of purpose; two recommendation letters; GRE optional.",
-     "Teaching and research assistantships with partial tuition waivers are available."),
-    ("gcsu-cs-phd", "gcsu", "Computer Science", "doctoral", "Computer Science", "Department of Computing Sciences", 18500, "3.30", True, 45,
-     "Research doctorate with strengths in coastal sensing, geospatial AI and human-computer interaction.",
-     "Master's or strong bachelor's in computing; GPA 3.3; research statement; three letters; interview with faculty.",
-     "All admitted PhD students are considered for funded research assistantships."),
-    ("gcsu-marine-phd", "gcsu", "Marine Biology", "doctoral", "Marine Biology", "Department of Life Sciences", 17500, "3.20", True, 60,
-     "Interdisciplinary doctorate focused on coastal ecosystems, fisheries and marine conservation.",
-     "Bachelor's or master's in biology or related field; research statement; three letters.",
-     "Research assistantships funded through coastal research grants."),
-    ("lsit-ds-ms", "lsit", "Data Science", "masters", "Data Science", "School of Information", 32000, "3.00", False, 100,
-     "Professional master's covering statistics, machine learning, data engineering and data visualization.",
-     "Bachelor's degree with calculus, linear algebra and programming; GPA 3.0; resume; statement of purpose.",
-     ""),
-    ("lsit-ece-ms", "lsit", "Electrical and Computer Engineering", "masters", "Electrical Engineering", "Department of Electrical and Computer Engineering", 30500, "3.20", True, 20,
-     "Specializations in embedded systems, signal processing, robotics and power systems.",
-     "Bachelor's in electrical or computer engineering; GPA 3.2; two letters.",
-     "Limited teaching assistantships for second-year students."),
-    ("lsit-ai-phd", "lsit", "Artificial Intelligence", "doctoral", "Artificial Intelligence", "Department of Computer Science", 31000, "3.50", True, 30,
-     "Research doctorate in machine learning, natural language processing, robotics and trustworthy AI.",
-     "Strong background in mathematics and programming; GPA 3.5; research statement; three letters.",
-     "Five-year funding packages including stipend and full tuition coverage."),
-    ("pru-cyber-ms", "pru", "Cybersecurity", "masters", "Cybersecurity", "Department of Computer Science", 28000, "3.00", False, 120,
-     "Hands-on program in network security, cryptography, digital forensics and secure software.",
-     "Bachelor's in computing or IT; GPA 3.0; statement of purpose; resume.",
-     ""),
-    ("pru-env-ms", "pru", "Environmental Science", "masters", "Environmental Science", "School of Earth and Ocean Sciences", 26500, "2.90", True, 90,
-     "Climate science, ocean-atmosphere interactions and environmental data analysis.",
-     "Bachelor's in a natural science or engineering; GPA 2.9; two letters.",
-     "Graduate research fellowships available on a competitive basis."),
-    ("hvu-mph", "hvu", "Public Health (MPH)", "masters", "Public Health", "School of Public Health", 41000, "3.00", True, 110,
-     "Concentrations in epidemiology, biostatistics, global health and health policy.",
-     "Bachelor's degree; GPA 3.0; statement of purpose; three letters; public health experience preferred.",
-     "Merit scholarships covering 25-50% of tuition."),
-    ("hvu-me-phd", "hvu", "Mechanical Engineering", "doctoral", "Mechanical Engineering", "Department of Mechanical Engineering", 45000, "3.40", True, -10,
-     "Doctoral research in robotics, biomechanics, energy systems and advanced manufacturing.",
-     "Bachelor's or master's in engineering; GPA 3.4; research statement; three letters.",
-     "Fully funded research assistantships."),
-    ("glu-mba", "glu", "Business Administration (MBA)", "masters", "Business Administration", "School of Business", 52000, None, True, 140,
-     "Full-time MBA with concentrations in analytics, finance, operations and entrepreneurship.",
-     "Bachelor's degree; two years of work experience recommended; essays; one letter.",
-     "Merit fellowships and graduate assistant positions."),
-    ("glu-cs-ms", "glu", "Computer Science", "masters", "Computer Science", "Department of Computer Science", 34000, "3.00", False, 50,
-     "Flexible master's with tracks in software systems, data science and artificial intelligence.",
-     "Bachelor's degree with programming coursework; GPA 3.0; two letters.",
-     ""),
-    ("mlis-cs-ms", "mlis", "Computer Science", "masters", "Computer Science", "Department of Computer Science", 24000, "3.30", True, 35,
-     "Research-based master's in machine learning, computer vision and distributed systems.",
-     "Four-year bachelor's in computer science; GPA equivalent to 3.3; English proficiency for international applicants.",
-     "Research stipends are provided to all thesis-based students."),
-    ("mlis-ds-ms", "mlis", "Data Science", "masters", "Data Science", "School of Data Science", 26000, "3.00", False, None,
-     "Course-based master's in applied statistics, machine learning and data ethics.",
-     "Bachelor's with statistics and programming; GPA equivalent to 3.0.",
-     ""),
+    {
+        "key": "tamucc-ms-cs",
+        "university": "tamucc",
+        "name": "Computer Science",
+        "degree_level": "masters",
+        "field_of_study": "Computer Science",
+        "department": "Computer Science Program, College of Engineering and Computer Science",
+        "description": (
+            "MS in Computer Science with a thesis option (minimum 30 credit hours) and a course-only option "
+            "(minimum 36 credit hours). Core courses: Design and Analysis of Algorithms, Advanced Computer "
+            "Architecture and Advanced Operating Systems. Course-only students take electives across three "
+            "tracks: Software and Programming, Data Science, and Cyber Science."
+        ),
+        "admission_requirements": (
+            "Application and fee; transcripts; a 500-1,000 word essay on why you want a master's degree and your "
+            "areas of interest; GRE scores taken within five years; TOEFL or IELTS for international students. "
+            "Prerequisites: data structures, a high-level programming language, computer architecture, operating "
+            "systems, software engineering, discrete mathematics, calculus and one junior-level math course; "
+            "missing prerequisites can be completed as leveling courses (grade B or better). "
+            "The catalog lists no minimum GPA or application deadline; check the Graduate Admissions office."
+        ),
+        "minimum_gpa": None,
+        "application_deadline": None,
+        "program_url": "https://catalog.tamucc.edu/graduate/engineering/masters/computer-science-ms/",
+    },
+    {
+        "key": "uh-ms-cs",
+        "university": "uh",
+        "name": "Computer Science",
+        "degree_level": "masters",
+        "field_of_study": "Computer Science",
+        "department": "Department of Computer Science, College of Natural Sciences and Mathematics",
+        "description": (
+            "MS in Computer Science with five tracks: Core, Data Analytics, Parallel and Distributed Systems, "
+            "Interactive Media, and Artificial Intelligence. A thesis option is available for students who "
+            "identify faculty they want to work with."
+        ),
+        "admission_requirements": UH_CS_DEADLINES + (
+            "The AI track does not admit in spring. Three recommendation letters, statement of purpose, "
+            "resume/CV and transcripts. GRE required for the Core, Data Analytics, Parallel and Distributed "
+            "Systems and Interactive Media tracks; optional for the AI track. English proficiency: TOEFL iBT 79, "
+            "IELTS 6.5 or Duolingo 105. No minimum GPA is stated; competitive applicants typically have 3.0/4.0 "
+            "or higher. Application fee: waived for U.S. citizens and permanent residents, $80 for international "
+            "applicants."
+        ),
+        "minimum_gpa": None,
+        "application_deadline": date(2027, 1, 15),
+        "program_url": UH_CS_ADMISSIONS,
+    },
+    {
+        "key": "uh-phd-cs",
+        "university": "uh",
+        "name": "Computer Science",
+        "degree_level": "doctoral",
+        "field_of_study": "Computer Science",
+        "department": "Department of Computer Science, College of Natural Sciences and Mathematics",
+        "description": (
+            "PhD in Computer Science. Department research spans artificial intelligence, data analytics, "
+            "computer systems, theory, cybersecurity and human-computer interaction."
+        ),
+        "admission_requirements": UH_CS_DEADLINES + (
+            "Three recommendation letters, statement of purpose, resume/CV and transcripts. English proficiency: "
+            "TOEFL iBT 79, IELTS 6.5 or Duolingo 105. Application fee: waived for U.S. citizens and permanent "
+            "residents, $80 for international applicants."
+        ),
+        "minimum_gpa": None,
+        "application_deadline": date(2027, 1, 15),
+        "program_url": UH_CS_ADMISSIONS,
+    },
+    {
+        "key": "uh-ms-sds",
+        "university": "uh",
+        "name": "Statistics and Data Science",
+        "degree_level": "masters",
+        "field_of_study": "Data Science",
+        "department": "Department of Mathematics",
+        "description": (
+            "MS in Statistics & Data Science (fall admission only). A math major is not required; probability, "
+            "statistics and programming experience help but are not required. Tuition follows the UH tuition "
+            "calculator plus a $200-per-credit-hour MSDS course fee."
+        ),
+        "admission_requirements": (
+            "Deadlines (fall only): April 1, 5 p.m. Central (international) and June 1, 5 p.m. Central (U.S. "
+            "citizens). Bachelor's or master's degree with Calculus II and Linear Algebra or equivalent. "
+            "Cumulative GPA of at least 3.00 in the last 60 hours. GRE waived. Three letters of recommendation "
+            "(at least one from a faculty member), resume, personal statement, and English test scores when "
+            "applicable. A Fast Track option is available to current UH undergraduates and recent alumni."
+        ),
+        "minimum_gpa": "3.00",
+        "application_deadline": date(2027, 4, 1),
+        "program_url": "https://www.uh.edu/nsm/math/graduate/ms-statistics-data-science/admission-application/",
+    },
+    {
+        "key": "utd-ms-cs",
+        "university": "utd",
+        "name": "Computer Science",
+        "degree_level": "masters",
+        "field_of_study": "Computer Science",
+        "department": "Erik Jonsson School of Engineering and Computer Science",
+        "description": (
+            "MS in Computer Science (minimum 33 semester credit hours; the thesis plan is 27 course hours plus "
+            "6 thesis hours). Tracks: Data Sciences, Cyber Security, Intelligent Systems, Interactive Computing, "
+            "Networks and Telecommunications, Systems, and Traditional Computer Science."
+        ),
+        "admission_requirements": UTD_MS_REQUIREMENTS,
+        "minimum_gpa": "3.00",
+        "application_deadline": date(2027, 3, 1),
+        "program_url": UTD_CS_CATALOG,
+    },
+    {
+        "key": "utd-ms-se",
+        "university": "utd",
+        "name": "Software Engineering",
+        "degree_level": "masters",
+        "field_of_study": "Software Engineering",
+        "department": "Erik Jonsson School of Engineering and Computer Science",
+        "description": "MS in Software Engineering (minimum 33 semester credit hours). Admission is competitive.",
+        "admission_requirements": UTD_MS_REQUIREMENTS.replace(" TOEFL iBT 80 for international applicants.", ""),
+        "minimum_gpa": "3.00",
+        "application_deadline": date(2027, 3, 1),
+        "program_url": UTD_SE_CATALOG,
+    },
+    {
+        "key": "utd-phd-se",
+        "university": "utd",
+        "name": "Software Engineering",
+        "degree_level": "doctoral",
+        "field_of_study": "Software Engineering",
+        "department": "Erik Jonsson School of Engineering and Computer Science",
+        "description": (
+            "PhD in Software Engineering (minimum 75 semester credit hours beyond the bachelor's degree), with a "
+            "qualifying examination and a dissertation."
+        ),
+        "admission_requirements": (
+            "Deadlines: fall - December 15, spring - May 15, summer - October 15. Either a master's degree in "
+            "computer science or equivalent with a GPA of at least 3.5, or a related bachelor's degree with two "
+            "semesters of calculus and linear algebra and a GPA of at least 3.5 in the last 60 semester credit "
+            "hours. GRE optional but advisable. Three letters of recommendation, a statement of purpose and a resume."
+        ),
+        "minimum_gpa": "3.50",
+        "application_deadline": date(2026, 12, 15),
+        "program_url": UTD_SE_CATALOG,
+    },
+    {
+        "key": "ut-ms-cs",
+        "university": "ut",
+        "name": "Computer Science",
+        "degree_level": "masters",
+        "field_of_study": "Computer Science",
+        "department": "Department of Computer Science",
+        "description": (
+            "On-campus MS in Computer Science (30 credit hours) with thesis and non-thesis options. A STEM-designated "
+            "degree; the department also offers an online MSCS through its Computer & Data Science Online program."
+        ),
+        "admission_requirements": UT_CS_REQUIREMENTS + "Master's admission decisions are released April 1.",
+        "minimum_gpa": "3.00",
+        "application_deadline": date(2026, 12, 15),
+        "program_url": UT_CS_APPLY,
+    },
+    {
+        "key": "ut-phd-cs",
+        "university": "ut",
+        "name": "Computer Science",
+        "degree_level": "doctoral",
+        "field_of_study": "Computer Science",
+        "department": "Department of Computer Science",
+        "description": "PhD in Computer Science at UT Austin's Department of Computer Science.",
+        "admission_requirements": UT_CS_REQUIREMENTS + "PhD admission decisions are released March 30.",
+        "minimum_gpa": "3.00",
+        "application_deadline": date(2026, 12, 15),
+        "program_url": UT_CS_APPLY,
+    },
 ]
 
-# (university, name, title, department, research areas, accepting_students, program keys, bio)
+UH_ALGORITHMS = "Listed in the University of Houston Computer Science Algorithms research area."
+UTD_ML_PAGE = "https://machine-learning.utdallas.edu/who-we-are"
+UTD_ML_NOTE = "Title and interests as listed by the UT Dallas Center for Machine Learning."
+UT_ML_NOTE = "Listed in UT Austin Computer Science Machine Learning research."
+UT_PROFILE = "https://www.cs.utexas.edu/people/faculty-researchers/"
+
+# university, name, title, research areas, profile URL, program keys, bio
 FACULTY = [
-    ("gcsu", "Dr. Elena Marquez", "Associate Professor", "Computing Sciences", "machine learning, geospatial AI, coastal sensing", True, ["gcsu-cs-ms", "gcsu-cs-phd"], "Builds machine-learning models for coastal monitoring and hurricane impact prediction."),
-    ("gcsu", "Dr. Samuel Okafor", "Professor", "Computing Sciences", "cybersecurity, network security, IoT security", True, ["gcsu-cs-ms", "gcsu-cs-phd"], "Studies security of connected devices and critical infrastructure."),
-    ("gcsu", "Dr. Priya Raman", "Assistant Professor", "Computing Sciences", "human-computer interaction, accessibility, software engineering", None, ["gcsu-cs-ms"], "Designs accessible software for people with low vision."),
-    ("gcsu", "Dr. Hannah Lindqvist", "Associate Professor", "Life Sciences", "marine ecology, fisheries, coral reef conservation", True, ["gcsu-marine-phd"], "Leads long-term monitoring of Gulf of Mexico reef systems."),
-    ("lsit", "Dr. Marcus Chen", "Professor", "Computer Science", "natural language processing, large language models, trustworthy AI", True, ["lsit-ai-phd", "lsit-ds-ms"], "Researches reliable and explainable language models."),
-    ("lsit", "Dr. Aisha Bello", "Assistant Professor", "Computer Science", "robotics, reinforcement learning, computer vision", True, ["lsit-ai-phd", "lsit-ece-ms"], "Teaches robots to learn manipulation skills from demonstration."),
-    ("lsit", "Dr. Tomás Herrera", "Associate Professor", "Electrical and Computer Engineering", "embedded systems, signal processing, wireless networks", False, ["lsit-ece-ms"], "Works on low-power wireless sensing platforms."),
-    ("lsit", "Dr. Grace Whitfield", "Professor", "School of Information", "data visualization, statistics, data ethics", None, ["lsit-ds-ms"], "Studies how people interpret charts and uncertainty."),
-    ("pru", "Dr. Kenji Watanabe", "Associate Professor", "Computer Science", "cryptography, applied security, digital forensics", True, ["pru-cyber-ms"], "Develops practical cryptographic protocols."),
-    ("pru", "Dr. Leila Haddad", "Professor", "Earth Sciences", "climate modeling, oceanography, environmental data science", True, ["pru-env-ms"], "Models ocean-atmosphere interactions using machine learning."),
-    ("hvu", "Dr. Nadia Petrova", "Associate Professor", "Public Health", "epidemiology, biostatistics, global health", True, ["hvu-mph"], "Studies infectious disease transmission in urban settings."),
-    ("hvu", "Dr. Robert Asante", "Professor", "Mechanical Engineering", "robotics, biomechanics, medical devices", True, ["hvu-me-phd"], "Designs wearable robotic devices for rehabilitation."),
-    ("glu", "Dr. Olivia Brennan", "Professor", "School of Business", "business analytics, operations research, supply chains", None, ["glu-mba"], "Applies optimization to supply-chain resilience."),
-    ("glu", "Dr. Daniel Kim", "Assistant Professor", "Computer Science", "distributed systems, cloud computing, software engineering", True, ["glu-cs-ms"], "Builds tools for reliable cloud software."),
-    ("mlis", "Dr. Sophie Tremblay", "Associate Professor", "Computer Science", "computer vision, machine learning, medical imaging", True, ["mlis-cs-ms", "mlis-ds-ms"], "Develops deep-learning methods for medical image analysis."),
-    ("mlis", "Dr. Arjun Mehta", "Professor", "School of Data Science", "statistics, causal inference, data ethics", False, ["mlis-ds-ms"], "Researches fair and causal machine learning."),
+    ("uh", "Stephen Huang", "Professor of Computer Science", "cybersecurity, intrusion detection, cyber behavior analytics, algorithms",
+     "https://www.uh.edu/nsm/computer-science/people/faculty/profiles/stephenhuang.php", ["uh-ms-cs", "uh-phd-cs"], UH_ALGORITHMS),
+    ("uh", "Rathish Das", "Assistant Professor", "approximation algorithms, parallel algorithms",
+     "https://www.uh.edu/nsm/computer-science/people/faculty/profiles/rathishdas.php", ["uh-ms-cs", "uh-phd-cs"], UH_ALGORITHMS),
+    ("uh", "Gopal Pandurangan", "", "algorithms, distributed computing",
+     "https://www.uh.edu/nsm/computer-science/people/faculty/profiles/gopalpandurangan.php", ["uh-ms-cs", "uh-phd-cs"], UH_ALGORITHMS),
+    ("uh", "Rakesh Verma", "", "cybersecurity, reasoning and data analytics for security",
+     "https://www2.cs.uh.edu/~rmverma/", ["uh-ms-cs", "uh-phd-cs"], UH_ALGORITHMS),
+    ("uh", "Carlos Ordonez", "", "big data systems, artificial intelligence",
+     "https://www2.cs.uh.edu/~ordonez/", ["uh-ms-cs", "uh-phd-cs"], UH_ALGORITHMS),
+    ("uh", "Panruo Wu", "Associate Professor", "algorithms, parallel computing",
+     "https://www2.cs.uh.edu/~panruowu/", ["uh-ms-cs", "uh-phd-cs"], UH_ALGORITHMS),
+    ("utd", "Sriraam Natarajan", "Professor; Director, Center for Machine Learning",
+     "artificial intelligence, machine learning, statistical relational learning, reinforcement learning, graphical models, biomedical applications",
+     UTD_ML_PAGE, ["utd-ms-cs"], UTD_ML_NOTE),
+    ("utd", "Rishabh Iyer", "Assistant Professor",
+     "optimization, submodular optimization, data efficient machine learning, robust learning, feature selection, data summarization",
+     UTD_ML_PAGE, ["utd-ms-cs"], UTD_ML_NOTE),
+    ("utd", "Vibhav Gogate", "Associate Professor; Co-Director, Center for Machine Learning",
+     "artificial intelligence, machine learning, data mining, probabilistic graphical models, probabilistic programming",
+     UTD_ML_PAGE, ["utd-ms-cs"], UTD_ML_NOTE),
+    ("utd", "Nicholas Ruozzi", "Associate Professor",
+     "statistical machine learning, probabilistic graphical models, approximate inference, optimization",
+     UTD_ML_PAGE, ["utd-ms-cs"], UTD_ML_NOTE),
+    ("utd", "Feng Chen", "Associate Professor",
+     "data mining, network mining, machine learning, event and pattern detection",
+     UTD_ML_PAGE, ["utd-ms-cs"], UTD_ML_NOTE),
+    ("utd", "Yu Xiang", "Assistant Professor", "robotics, computer vision, robot learning",
+     UTD_ML_PAGE, ["utd-ms-cs"], UTD_ML_NOTE),
+    ("ut", "Kristen Grauman", "Professor", "machine learning", UT_PROFILE + "kristen-grauman", ["ut-ms-cs", "ut-phd-cs"], UT_ML_NOTE),
+    ("ut", "Peter Stone", "Head of School and Professor", "machine learning", UT_PROFILE + "peter-stone", ["ut-ms-cs", "ut-phd-cs"], UT_ML_NOTE),
+    ("ut", "Inderjit Dhillon", "Professor", "machine learning", UT_PROFILE + "inderjit-dhillon", ["ut-ms-cs", "ut-phd-cs"], UT_ML_NOTE),
+    ("ut", "Adam Klivans", "Professor", "machine learning", UT_PROFILE + "adam-klivans", ["ut-ms-cs", "ut-phd-cs"], UT_ML_NOTE),
+    ("ut", "Risto Miikkulainen", "Professor", "machine learning", UT_PROFILE + "risto-miikkulainen", ["ut-ms-cs", "ut-phd-cs"], UT_ML_NOTE),
+    ("ut", "Yuke Zhu", "Associate Professor", "machine learning", UT_PROFILE + "yuke-zhu", ["ut-ms-cs", "ut-phd-cs"], UT_ML_NOTE),
+    ("ut", "Philipp Krähenbühl", "Associate Professor", "machine learning", UT_PROFILE + "philipp-krahenbuhl", ["ut-ms-cs", "ut-phd-cs"], UT_ML_NOTE),
+    ("ut", "David Harwath", "Assistant Professor", "machine learning", UT_PROFILE + "david-harwath", ["ut-ms-cs", "ut-phd-cs"], UT_ML_NOTE),
 ]
 
-# (name, type, university or None, program key or None, provider, amount, note, covers_tuition, international, degree_levels, deadline_in_days, eligibility, description)
 FUNDING = [
-    ("Graduate Research Assistantship - Computing", "assistantship", "gcsu", "gcsu-cs-phd", "", 24000, "per year stipend plus tuition waiver", True, True, "doctoral", 45, "Admitted PhD students in good standing.", "Research positions funded by faculty grants."),
-    ("Computing Teaching Assistantship", "assistantship", "gcsu", "gcsu-cs-ms", "", 12000, "per academic year, partial tuition waiver", False, True, "masters", 60, "Full-time master's students with strong communication skills.", "Assist with undergraduate programming courses."),
-    ("Coastal Research Fellowship", "fellowship", "gcsu", "gcsu-marine-phd", "", 28000, "per year for up to 4 years", True, True, "doctoral", 50, "Doctoral applicants in marine or environmental sciences.", "Supports research on Gulf coastal ecosystems."),
-    ("Trustworthy AI Doctoral Fellowship", "fellowship", "lsit", "lsit-ai-phd", "", 38000, "per year plus full tuition", True, True, "doctoral", 25, "First-year PhD applicants in AI or machine learning.", "Five-year fellowship for research on reliable AI."),
-    ("Lone Star Engineering Scholarship", "scholarship", "lsit", None, "", 5000, "one-time award", False, False, "masters", 80, "Texas residents admitted to an engineering master's program.", "Merit scholarship for engineering graduate students."),
-    ("Ocean and Climate Graduate Fellowship", "fellowship", "pru", "pru-env-ms", "", 20000, "per year", False, True, "masters", 70, "Admitted environmental science students with research experience.", "Competitive fellowship for climate research."),
-    ("Public Health Merit Scholarship", "scholarship", "hvu", "hvu-mph", "", 15000, "per year (about 35% of tuition)", False, True, "masters", 110, "All MPH applicants are considered automatically.", "Merit-based tuition scholarship."),
-    ("MBA Analytics Fellowship", "fellowship", "glu", "glu-mba", "", 20000, "per year", False, True, "masters", 120, "MBA applicants with quantitative backgrounds.", "Fellowship for students in the analytics concentration."),
-    ("Maple Leaf International Excellence Award", "scholarship", "mlis", None, "", 10000, "one-time award", False, True, "", 30, "International students admitted to any graduate program.", "Entrance award for high-achieving international students."),
-    ("Women in Computing Graduate Scholarship", "scholarship", None, None, "Sample Computing Foundation", 8000, "one-time award", False, True, "masters,doctoral", 55, "Women pursuing graduate study in computing fields.", "External scholarship open to students at any university."),
-    ("First-Generation Graduate Student Grant", "grant", None, None, "Sample Education Trust", 3000, "one-time award", False, False, "", 95, "First-generation college graduates entering graduate school in the U.S.", "Helps cover application fees, relocation and books."),
+    {
+        "name": "NSF Graduate Research Fellowship (GRFP)",
+        "funding_type": "fellowship",
+        "university": None,
+        "provider": "U.S. National Science Foundation",
+        "description": (
+            "Supports students in research-based master's and doctoral programs in STEM fields, including "
+            "computer and information science. Three years of support usable over a five-year period."
+        ),
+        "eligibility": (
+            "U.S. citizens, nationals and permanent residents in an eligible STEM field who have completed less "
+            "than one academic year of graduate study. Applications are due each October (the 2026 deadline for "
+            "Computer and Information Science and Engineering was October 20, 2026)."
+        ),
+        "amount": 37000,
+        "amount_note": "per year stipend for 3 years, plus a $16,000 cost-of-education allowance to the university",
+        "covers_tuition": True,
+        "international_eligible": False,
+        "degree_levels": "masters,doctoral",
+        "deadline": None,
+        "url": "https://www.nsf.gov/funding/opportunities/grfp-nsf-graduate-research-fellowship-program/nsf26-526/solicitation",
+    },
+    {
+        "name": "Fulbright Foreign Student Program",
+        "funding_type": "scholarship",
+        "university": None,
+        "provider": "U.S. Department of State",
+        "description": (
+            "About 4,000 grants each year for international students to study for a master's or doctoral degree "
+            "and conduct research at U.S. universities."
+        ),
+        "eligibility": (
+            "Non-U.S. citizens. Eligibility, award benefits, deadlines and university placement vary by country; "
+            "apply through the Fulbright Commission/Foundation or U.S. Embassy in your home country."
+        ),
+        "amount": None,
+        "amount_note": "benefits vary by country",
+        "covers_tuition": False,
+        "international_eligible": True,
+        "degree_levels": "masters,doctoral",
+        "deadline": None,
+        "url": "https://foreign.fulbrightonline.org/apply",
+    },
+    {
+        "name": "UT Dallas Computer Science Teaching Assistantships",
+        "funding_type": "assistantship",
+        "university": "utd",
+        "provider": "",
+        "description": "Teaching assistant positions in the UT Dallas Department of Computer Science.",
+        "eligibility": (
+            "Most teaching assistantships are offered to students admitted to start in fall semesters; admitted "
+            "students are told about any TA support after admission. See the department's admissions FAQ."
+        ),
+        "amount": None,
+        "amount_note": "",
+        "covers_tuition": False,
+        "international_eligible": True,
+        "degree_levels": "",
+        "deadline": None,
+        "url": "https://cs.utdallas.edu/admissions/admissions-faq",
+    },
 ]
 
 
 class Command(BaseCommand):
-    help = "Create a repeatable, clearly-labelled SAMPLE dataset for development and demos."
+    help = "Load GradApp's verified real starter data and remove old fictional sample records."
 
     @transaction.atomic
     def handle(self, *args, **options):
-        today = date.today()
-
-        def due(days):
-            return today + timedelta(days=days) if days is not None else None
-
-        # Deactivate Iteration 1 placeholder records that used real university names.
-        GraduateProgram.objects.filter(description="Sample record for Iteration 1 testing.").update(is_active=False)
+        removed = self.remove_sample_data()
+        verified_at = timezone.make_aware(datetime.combine(VERIFIED_ON, time(12)))
 
         universities = {}
         for data in UNIVERSITIES:
             data = dict(data)
             key = data.pop("key")
-            universities[key], _ = University.objects.update_or_create(name=data["name"], defaults=data)
+            university, created = University.objects.get_or_create(name=data["name"], defaults=data)
+            if not created and (".example" in university.website_url or not university.website_url):
+                university.website_url = data["website_url"]
+                university.save(update_fields=["website_url"])
+            universities[key] = university
 
         programs = {}
-        for (key, uni, name, degree, field, dept, tuition, gpa, funding, deadline, desc, reqs, funding_details) in PROGRAMS:
-            university = universities[uni]
-            slug = key.split("-", 1)[1]
-            programs[key], _ = GraduateProgram.objects.update_or_create(
-                university=university,
-                name=name,
-                degree_level=degree,
-                defaults={
-                    "field_of_study": field,
-                    "department": dept,
-                    "description": f"{desc} {SAMPLE_NOTE}",
-                    "admission_requirements": reqs,
-                    "minimum_gpa": gpa,
-                    "tuition_per_year": tuition,
-                    "funding_available": funding,
-                    "funding_details": funding_details,
-                    "application_deadline": due(deadline),
-                    "program_url": f"{university.website_url}graduate/{slug}",
-                    "is_active": True,
-                    "origin": "sample",
-                },
-            )
+        for data in PROGRAMS:
+            data = dict(data)
+            key = data.pop("key")
+            university = universities[data.pop("university")]
+            program = GraduateProgram.objects.filter(
+                university=university, name=data["name"], degree_level=data["degree_level"]
+            ).first()
+            values = {
+                **data,
+                "tuition_per_year": None,
+                "funding_available": False,
+                "origin": "admin",
+                "needs_review": False,
+                "is_active": True,
+                "source_retrieved_at": verified_at,
+            }
+            if program is None:
+                program = GraduateProgram.objects.create(university=university, **values)
+            elif program.source_retrieved_at is None or program.source_retrieved_at <= verified_at:
+                # Never overwrite information refreshed after this dataset was verified.
+                for field, value in values.items():
+                    setattr(program, field, value)
+                program.save()
+            programs[key] = program
 
-        for (uni, name, title, dept, areas, accepting, program_keys, bio) in FACULTY:
-            university = universities[uni]
+        for university_key, name, title, areas, profile_url, program_keys, bio in FACULTY:
             member, _ = Faculty.objects.update_or_create(
-                university=university,
+                university=universities[university_key],
                 name=name,
                 defaults={
                     "title": title,
-                    "department": dept,
+                    "department": "Department of Computer Science",
                     "research_areas": areas,
-                    "accepting_students": accepting,
-                    "bio": f"{bio} (Fictional sample profile.)",
-                    "email": f"{name.split()[-1].lower()}@{university.website_url.split('//')[1].strip('/').replace('www.', '')}",
-                    "profile_url": f"{university.website_url}people/{name.split()[-1].lower()}",
-                    "origin": "sample",
+                    "profile_url": profile_url,
+                    "bio": bio,
+                    "accepting_students": None,
+                    "origin": "admin",
+                    "needs_review": False,
+                    "is_active": True,
                 },
             )
             member.programs.set([programs[key] for key in program_keys])
 
-        for (name, ftype, uni, program_key, provider, amount, note, covers, intl, levels, deadline, eligibility, desc) in FUNDING:
-            university = universities[uni] if uni else None
+        for data in FUNDING:
+            data = dict(data)
+            university_key = data.pop("university")
             FundingOpportunity.objects.update_or_create(
-                name=name,
+                name=data["name"],
                 defaults={
-                    "funding_type": ftype,
-                    "university": university,
-                    "program": programs[program_key] if program_key else None,
-                    "provider": provider or (university.name if university else ""),
-                    "amount": amount,
-                    "amount_note": note,
-                    "covers_tuition": covers,
-                    "international_eligible": intl,
-                    "degree_levels": levels,
-                    "deadline": due(deadline),
-                    "eligibility": eligibility,
-                    "description": f"{desc} {SAMPLE_NOTE}",
-                    "url": f"{university.website_url}funding" if university else "https://www.scholarships.example/",
+                    **data,
+                    "university": universities[university_key] if university_key else None,
+                    "provider": data["provider"] or (universities[university_key].name if university_key else ""),
+                    "origin": "admin",
+                    "needs_review": False,
                     "is_active": True,
-                    "origin": "sample",
                 },
             )
 
         self.stdout.write(self.style.SUCCESS(
-            f"Sample data ready: {len(universities)} universities, {len(programs)} programs, "
-            f"{len(FACULTY)} faculty, {len(FUNDING)} funding opportunities."
+            f"Real data ready (verified {VERIFIED_ON:%B %d, %Y}): {len(universities)} universities, "
+            f"{len(PROGRAMS)} programs, {len(FACULTY)} faculty, {len(FUNDING)} funding opportunities."
+            + (f" Removed {removed} old sample records." if removed else "")
         ))
+
+    @staticmethod
+    def remove_sample_data():
+        """Delete fictional records created by earlier versions (".example" addresses)."""
+        removed = 0
+        for model in (FundingOpportunity, Faculty, GraduateProgram):
+            count, _ = model.objects.filter(origin="sample").delete()
+            removed += count
+        count, _ = University.objects.filter(website_url__contains=".example").delete()
+        removed += count
+        # Iteration 1 placeholder programs (real university names, invented numbers).
+        GraduateProgram.objects.filter(description="Sample record for Iteration 1 testing.").update(is_active=False)
+        return removed

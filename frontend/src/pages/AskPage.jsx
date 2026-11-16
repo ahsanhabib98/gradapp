@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api";
-import { Alert, Loading } from "../components/ui";
+import { Alert, Loading, isSampleUrl } from "../components/ui";
 import { Icon } from "../icons";
 
 const SUGGESTIONS = [
@@ -33,7 +33,7 @@ function AnswerText({ text, sources }) {
         if (!ref) return part;
         const source = byRef[ref];
         if (source && RECORD_LINK[source.type]) return <Link key={index} className="ref" to={RECORD_LINK[source.type](source)}>{ref}</Link>;
-        if (source?.url) return <a key={index} className={`ref ${source.type === "web" ? "web" : ""}`} href={source.url} target="_blank" rel="noreferrer" title={source.title}>{ref}</a>;
+        if (source?.url && !isSampleUrl(source.url)) return <a key={index} className={`ref ${source.type === "web" ? "web" : ""}`} href={source.url} target="_blank" rel="noreferrer" title={source.title}>{ref}</a>;
         return <span key={index} className="ref">{ref}</span>;
       })}
     </p>
@@ -82,7 +82,7 @@ function Sources({ sources }) {
               <li key={source.ref}>
                 <span className="ref">{source.ref}</span>
                 {RECORD_LINK[source.type] ? <Link to={RECORD_LINK[source.type](source)}>{source.title}</Link>
-                  : source.url ? <a href={source.url} target="_blank" rel="noreferrer">{source.title}</a> : source.title}
+                  : source.url && !isSampleUrl(source.url) ? <a href={source.url} target="_blank" rel="noreferrer">{source.title}</a> : source.title}
                 <small>{source.type}</small>
               </li>
             ))}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
-import { Alert, Empty, Loading, PageHeader, daysLabel, formatDate } from "../components/ui";
+import { Alert, Empty, ExternalLink, Loading, PageHeader, daysLabel, formatDate } from "../components/ui";
 import { Icon } from "../icons";
 
 const KIND = {
@@ -74,7 +74,7 @@ export default function DeadlinesPage() {
                       {item.status_display && <> · <span className={`status-pill ${item.status}`}>{item.status_display}</span></>}
                     </p>
                   </div>
-                  {item.url && <a className="icon-button" href={item.url} target="_blank" rel="noreferrer" aria-label="Open official page"><Icon name="external" size={17} /></a>}
+                  <ExternalLink className="icon-button" href={item.url} hideIfSample aria-label="Open official page"><Icon name="external" size={17} /></ExternalLink>
                 </li>
               ))}
             </ol>

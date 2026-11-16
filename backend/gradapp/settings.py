@@ -171,6 +171,8 @@ AI_TIMEOUT_SECONDS = float(os.getenv("AI_TIMEOUT_SECONDS", "30"))
 AI_WEB_SEARCH_TIMEOUT_SECONDS = float(os.getenv("AI_WEB_SEARCH_TIMEOUT_SECONDS", "90"))
 # Let the assistant search the web when GradApp's records cannot answer a question.
 AI_WEB_SEARCH_ENABLED = os.getenv("AI_WEB_SEARCH_ENABLED", "true").lower() == "true"
+# Only save web-search results whose official links actually load.
+AI_REQUIRE_LIVE_LINKS = os.getenv("AI_REQUIRE_LIVE_LINKS", "true").lower() == "true"
 
 RETRIEVAL_USER_AGENT = os.getenv(
     "RETRIEVAL_USER_AGENT", "GradAppBot/1.0 (educational project; COSC 6370)"

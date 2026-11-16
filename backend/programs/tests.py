@@ -250,12 +250,54 @@ class RetrievalTests(APITestCase):
 
 
 class SeedCommandTests(APITestCase):
-    def test_seed_is_repeatable(self):
+    def seed(self):
         from io import StringIO
 
         from django.core.management import call_command
 
         call_command("seed_programs", stdout=StringIO())
-        call_command("seed_programs", stdout=StringIO())
-        self.assertEqual(GraduateProgram.objects.count(), 14)
-        self.assertTrue(all("(Sample)" in p.university.name for p in GraduateProgram.objects.all()))
+
+    def test_seed_loads_only_real_records_with_official_links(self):
+        from .models import Faculty, FundingOpportunity
+
+        self.seed()
+        self.seed()  # repeatable
+        self.assertEqual(GraduateProgram.objects.count(), 9)
+        self.assertEqual(Faculty.objects.count(), 20)
+        self.assertEqual(FundingOpportunity.objects.count(), 3)
+        urls = [p.program_url for p in GraduateProgram.objects.all()]
+        urls += [p.university.website_url for p in GraduateProgram.objects.select_related("university")]
+        urls += [f.profile_url for f in Faculty.objects.all()] + [f.url for f in FundingOpportunity.objects.all()]
+        for url in urls:
+            self.assertTrue(url.startswith("https://"), url)
+            self.assertNotIn(".example", url)
+        for program in GraduateProgram.objects.all():
+            self.assertNotIn("(Sample)", program.university.name)
+            self.assertIsNotNone(program.source_retrieved_at)
+            self.assertFalse(program.needs_review)
+        houston = GraduateProgram.objects.get(university__name="University of Houston", degree_level="masters", name="Computer Science")
+        self.assertEqual(houston.faculty.count(), 6)
+
+    def test_seed_removes_old_sample_records(self):
+        from .models import University
+
+        sample = University.objects.create(
+            name="Gulf Coast State University (Sample)", city="Corpus Christi", state_or_region="Texas",
+            website_url="https://www.gulfcoast-state.example/",
+        )
+        make_program(sample, "Marine Biology", origin="sample", program_url="https://www.gulfcoast-state.example/x")
+        self.seed()
+        self.assertFalse(University.objects.filter(name__contains="(Sample)").exists())
+        self.assertFalse(GraduateProgram.objects.filter(program_url__contains=".example").exists())
+
+    def test_seed_does_not_overwrite_newer_real_data(self):
+        from django.utils import timezone
+
+        self.seed()
+        program = GraduateProgram.objects.get(university__name="University of Houston", degree_level="masters", name="Computer Science")
+        program.tuition_per_year = 12345
+        program.source_retrieved_at = timezone.now() + timezone.timedelta(days=1)
+        program.save()
+        self.seed()
+        program.refresh_from_db()
+        self.assertEqual(str(program.tuition_per_year), "12345.00")

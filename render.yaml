@@ -24,7 +24,7 @@ services:
         value: "false"
       - key: HTTPS
         value: "true"
-      - key: SEED_SAMPLE_DATA
+      - key: SEED_SAMPLE_DATA      # loads the verified real starter data
         value: "true"
       - key: DJANGO_SUPERUSER_USERNAME
         value: admin

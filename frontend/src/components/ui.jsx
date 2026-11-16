@@ -42,6 +42,38 @@ export function degreeLabel(level) {
   return { masters: "Master’s", doctoral: "Doctoral", other: "Other graduate" }[level] || level;
 }
 
+/* ------------------------------------------------------------ links */
+
+/** Sample data uses reserved ".example" domains that never resolve to a real website. */
+export function isSampleUrl(url) {
+  if (!url) return false;
+  try {
+    return new URL(url).hostname.endsWith(".example");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Link to an outside website. For fictional sample records it renders a
+ * clearly-labelled, non-clickable marker instead of a link that cannot load.
+ * - ``hideIfSample``: render nothing for sample URLs (icon-only buttons).
+ * - ``sampleLabel``: text to show instead of ``children`` for sample URLs.
+ */
+export function ExternalLink({ href, className = "", children, hideIfSample = false, sampleLabel, ...rest }) {
+  if (!href) return null;
+  if (isSampleUrl(href)) {
+    if (hideIfSample) return null;
+    return (
+      <span className={`${className} sample-link`} title="Sample data: this fictional record has no real website." aria-disabled="true">
+        {sampleLabel || children}
+        {!sampleLabel && <small>sample</small>}
+      </span>
+    );
+  }
+  return <a className={className} href={href} target="_blank" rel="noreferrer" {...rest}>{children}</a>;
+}
+
 /* ------------------------------------------------------------ primitives */
 
 export function Field({ label, children, full = false, hint }) {

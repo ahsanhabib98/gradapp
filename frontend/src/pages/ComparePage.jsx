@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
-import { Alert, Empty, Loading, PageHeader, SaveButton, daysLabel, degreeLabel, formatDate, formatMoney } from "../components/ui";
+import { Alert, Empty, ExternalLink, Loading, PageHeader, SaveButton, daysLabel, degreeLabel, formatDate, formatMoney } from "../components/ui";
 import { useCompare } from "../context";
 import { Icon } from "../icons";
 
@@ -83,7 +83,7 @@ export default function ComparePage() {
                     <Link to={`/programs/${program.id}`}>{program.name}</Link>
                     <div className="compare-head-actions">
                       <SaveButton programId={program.id} compact />
-                      <a className="icon-button" href={program.program_url} target="_blank" rel="noreferrer" aria-label="Official site"><Icon name="external" size={16} /></a>
+                      <ExternalLink className="icon-button" href={program.program_url} hideIfSample aria-label="Official site"><Icon name="external" size={16} /></ExternalLink>
                       <button className="icon-button" onClick={() => remove(program.id)} aria-label={`Remove ${program.name}`}><Icon name="close" size={16} /></button>
                     </div>
                   </th>

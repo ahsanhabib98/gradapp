@@ -39,6 +39,7 @@ def web_result():
     return {"text": WEB_TEXT, "citations": [dict(c) for c in CITATIONS]}
 
 
+@mock.patch("assistant.web.link_is_live", return_value=True)
 @mock.patch("assistant.qa.llm.is_configured", return_value=True)
 class WebSearchFallbackTests(APITestCase):
     def setUp(self):
@@ -49,7 +50,7 @@ class WebSearchFallbackTests(APITestCase):
 
     @mock.patch("assistant.web.llm.complete", return_value=EXTRACTED)
     @mock.patch("assistant.web.llm.web_search", side_effect=lambda *a, **k: web_result())
-    def test_no_records_triggers_web_search_and_saves_results(self, web_search, _complete, _configured):
+    def test_no_records_triggers_web_search_and_saves_results(self, web_search, _complete, _configured, _live):
         response = self.ask("Tell me about the MS in Computer Science at the University of Houston")
         self.assertTrue(response.data["web_searched"])
         web_search.assert_called_once()
@@ -75,7 +76,7 @@ class WebSearchFallbackTests(APITestCase):
 
     @mock.patch("assistant.web.llm.complete", return_value=EXTRACTED)
     @mock.patch("assistant.web.llm.web_search", side_effect=lambda *a, **k: web_result())
-    def test_saved_records_answer_the_next_question_from_gradapp(self, _web_search, _complete, _configured):
+    def test_saved_records_answer_the_next_question_from_gradapp(self, _web_search, _complete, _configured, _live):
         self.ask("Tell me about the MS in Computer Science at the University of Houston")
         with mock.patch("assistant.qa.llm.complete", return_value="See [P1].") as answer:
             response = self.ask("What is the tuition for computer science in Houston?")
@@ -84,7 +85,7 @@ class WebSearchFallbackTests(APITestCase):
 
     @mock.patch("assistant.web.llm.complete", return_value=EXTRACTED)
     @mock.patch("assistant.web.llm.web_search", side_effect=lambda *a, **k: web_result())
-    def test_existing_records_are_never_modified(self, _web_search, _complete, _configured):
+    def test_existing_records_are_never_modified(self, _web_search, _complete, _configured, _live):
         houston = make_university("University of Houston", city="Houston")
         existing = make_program(houston, "Computer Science", tuition_per_year=99999)
         self.ask("anything", search_web=True)
@@ -95,7 +96,7 @@ class WebSearchFallbackTests(APITestCase):
 
     @mock.patch("assistant.web.llm.complete", return_value="{}")
     @mock.patch("assistant.web.llm.web_search", side_effect=lambda *a, **k: web_result())
-    def test_records_that_cannot_answer_trigger_web_search(self, web_search, _complete, _configured):
+    def test_records_that_cannot_answer_trigger_web_search(self, web_search, _complete, _configured, _live):
         make_program(make_university(), "Data Science", description="Statistics.")
         with mock.patch("assistant.qa.llm.complete", return_value="NO_ANSWER"):
             response = self.ask("Which data science programs are in Houston?")
@@ -103,7 +104,7 @@ class WebSearchFallbackTests(APITestCase):
         web_search.assert_called_once()
 
     @mock.patch("assistant.web.llm.web_search")
-    def test_search_web_button_skips_database(self, web_search, _configured):
+    def test_search_web_button_skips_database(self, web_search, _configured, _live):
         web_search.return_value = {"text": "From the web.", "citations": []}
         make_program(make_university(), "Data Science")
         with mock.patch("assistant.qa.llm.complete") as answer_from_records:
@@ -112,14 +113,14 @@ class WebSearchFallbackTests(APITestCase):
         self.assertEqual(response.data["answer"], "From the web.")
 
     @mock.patch("assistant.web.llm.web_search", return_value=None)
-    def test_failed_web_search_falls_back_gracefully(self, _web_search, _configured):
+    def test_failed_web_search_falls_back_gracefully(self, _web_search, _configured, _live):
         with mock.patch("assistant.qa.llm.complete", return_value=None):
             response = self.ask("zzzz qqqq")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(response.data["web_searched"])
         self.assertIn("couldn't find", response.data["answer"])
 
-    def test_web_search_disabled_setting(self, _configured):
+    def test_web_search_disabled_setting(self, _configured, _live):
         with self.settings(AI_WEB_SEARCH_ENABLED=False), \
              mock.patch("assistant.web.llm.web_search") as web_search, \
              mock.patch("assistant.qa.llm.complete", return_value=None):
@@ -189,3 +190,78 @@ class ConversationTests(APITestCase):
         response = self.client.post(reverse("conversation-messages", args=[other.id]), {"question": "hi"}, format="json")
         self.assertEqual(response.status_code, 404)
         self.assertEqual(self.client.get(reverse("conversation-list")).data["count"], 0)
+
+
+class OfficialLinkRulesTests(APITestCase):
+    """Ask AI only saves records whose links are official and working."""
+
+    def save(self, data, citations, live=True):
+        from .web import _save_records
+
+        with mock.patch("assistant.web.link_is_live", return_value=live):
+            return _save_records(data, set(citations))
+
+    def program(self, **extra):
+        item = {"university": "University of Houston", "city": "Houston", "country": "United States",
+                "name": "Computer Science", "degree_level": "masters", "field_of_study": "Computer Science",
+                "source_url": "https://www.uh.edu/nsm/computer-science/graduate/"}
+        item.update(extra)
+        return {"programs": [item]}
+
+    def test_official_university_page_is_saved(self):
+        saved = self.save(self.program(), ["https://www.uh.edu/nsm/computer-science/graduate/"])
+        self.assertEqual(len(saved), 1)
+        program = GraduateProgram.objects.get(pk=saved[0]["id"])
+        self.assertEqual(program.program_url, "https://www.uh.edu/nsm/computer-science/graduate/")
+        self.assertTrue(program.university.website_url.startswith("https://www.uh.edu"))
+
+    def test_aggregator_sources_are_never_saved(self):
+        url = "https://collegedunia.com/usa/university/1429-university-of-houston/ms-cs"
+        self.assertEqual(self.save(self.program(source_url=url), [url]), [])
+        self.assertFalse(GraduateProgram.objects.exists())
+
+    def test_non_university_site_rejected_for_new_university(self):
+        url = "https://www.some-education-blog.com/uh-ms-cs"
+        self.assertEqual(self.save(self.program(source_url=url), [url]), [])
+
+    def test_non_us_university_accepted_when_domain_matches_its_website(self):
+        url = "https://www.utoronto.ca/academics/computer-science-msc"
+        data = self.program(university="University of Toronto", source_url=url, university_website="https://www.utoronto.ca/")
+        self.assertEqual(len(self.save(data, [url])), 1)
+
+    def test_source_must_match_existing_university_domain(self):
+        University.objects.create(name="University of Houston", city="Houston", state_or_region="Texas",
+                                  website_url="https://www.uh.edu/")
+        url = "https://www.utdallas.edu/some-page"
+        self.assertEqual(self.save(self.program(source_url=url), [url]), [])
+
+    def test_dead_links_are_not_saved(self):
+        url = "https://www.uh.edu/nsm/computer-science/graduate/"
+        self.assertEqual(self.save(self.program(), [url], live=False), [])
+
+    def test_external_funding_from_funder_site_is_saved(self):
+        url = "https://www.nsf.gov/funding/grfp"
+        data = {"funding": [{"name": "NSF GRFP", "funding_type": "fellowship", "source_url": url}]}
+        saved = self.save(data, [url])
+        self.assertEqual(FundingOpportunity.objects.get(pk=saved[0]["id"]).url, url)
+
+    def test_registrable_domain(self):
+        from .web import is_aggregator, registrable_domain
+
+        self.assertEqual(registrable_domain("https://www2.cs.uh.edu/~x"), "uh.edu")
+        self.assertEqual(registrable_domain("https://www.ox.ac.uk/admissions"), "ox.ac.uk")
+        self.assertEqual(registrable_domain("http://127.0.0.1/x"), "")
+        self.assertTrue(is_aggregator("https://www.yocket.com/x"))
+        self.assertTrue(is_aggregator("https://someone.github.io/"))
+        self.assertFalse(is_aggregator("https://www.cs.utexas.edu/graduate/apply"))
+
+    def test_link_check_treats_bot_blocking_as_live_and_404_as_dead(self):
+        from .web import link_is_live
+
+        with mock.patch("programs.retrieval.validate_public_url"), mock.patch("assistant.web.requests.head") as head:
+            head.return_value = mock.Mock(status_code=403)
+            self.assertTrue(link_is_live("https://www.uh.edu/"))
+            head.return_value = mock.Mock(status_code=404)
+            self.assertFalse(link_is_live("https://www.uh.edu/missing"))
+            head.side_effect = __import__("requests").ConnectionError()
+            self.assertFalse(link_is_live("https://www.uh.edu/"))

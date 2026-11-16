@@ -10,6 +10,7 @@ fi
 
 python manage.py migrate --noinput
 
+# Loads verified real starter data and removes old fictional sample records.
 if [ "${SEED_SAMPLE_DATA:-false}" = "true" ]; then
   python manage.py seed_programs
 fi

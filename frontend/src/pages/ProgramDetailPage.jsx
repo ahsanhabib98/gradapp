@@ -13,6 +13,7 @@ import {
   formatDate,
   formatDateTime,
   formatMoney,
+  ExternalLink,
   ReviewBadge,
 } from "../components/ui";
 import { FacultyCard } from "./FacultyPage";
@@ -136,9 +137,16 @@ export default function ProgramDetailPage() {
         <div className="detail-actions">
           <SaveButton programId={program.id} />
           <CompareButton program={program} />
-          <a className="primary" href={program.program_url} target="_blank" rel="noreferrer">Official site<Icon name="external" size={17} /></a>
+          <ExternalLink className="primary" href={program.program_url} sampleLabel="Sample program · no official site">Official site<Icon name="external" size={17} /></ExternalLink>
         </div>
       </section>
+
+      {program.origin === "sample" && (
+        <Alert tone="info">
+          This is a fictional sample program used to demonstrate GradApp. Its university, numbers and links are not real.
+          Ask AI about a real university to have GradApp find and save real programs.
+        </Alert>
+      )}
 
       <div className="facts-grid">
         <div className="fact"><Icon name="money" /><span>Estimated tuition<strong>{formatMoney(program.tuition_per_year) ? `${formatMoney(program.tuition_per_year)} / year` : "Not listed"}</strong></span></div>
@@ -189,7 +197,7 @@ export default function ProgramDetailPage() {
           <section className="panel">
             <h3>Location</h3>
             <p><Icon name="location" size={16} /> {university.city}, {university.state_or_region}, {university.country}</p>
-            <a className="text-link" href={university.website_url} target="_blank" rel="noreferrer">University website<Icon name="external" size={15} /></a>
+            <ExternalLink className="text-link" href={university.website_url} sampleLabel="Fictional sample university">University website<Icon name="external" size={15} /></ExternalLink>
           </section>
           <section className="panel">
             <h3>Similar programs</h3>

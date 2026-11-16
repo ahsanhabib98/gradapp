@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, query } from "../api";
-import { Alert, Empty, Loading, PageHeader, Pagination, ReviewBadge } from "../components/ui";
+import { Alert, Empty, ExternalLink, Loading, PageHeader, Pagination, ReviewBadge } from "../components/ui";
 import { Icon } from "../icons";
 
 const ACCEPTING = {
@@ -34,8 +34,8 @@ export function FacultyCard({ member, compact = false }) {
       <div className="info-card-footer">
         <span className={`badge ${accepting.className}`}>{accepting.label}</span>
         <div className="inline-links">
-          {member.email && <a href={`mailto:${member.email}`} aria-label={`Email ${member.name}`}><Icon name="mail" size={16} /></a>}
-          {member.profile_url && <a href={member.profile_url} target="_blank" rel="noreferrer">Profile<Icon name="external" size={14} /></a>}
+          {member.email && !member.email.endsWith(".example") && <a href={`mailto:${member.email}`} aria-label={`Email ${member.name}`}><Icon name="mail" size={16} /></a>}
+          <ExternalLink href={member.profile_url}>Profile<Icon name="external" size={14} /></ExternalLink>
         </div>
       </div>
       {!compact && member.programs.length > 0 && (

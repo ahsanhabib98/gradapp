@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, query } from "../api";
-import { Alert, Empty, Field, Loading, PageHeader, Pagination, ReviewBadge, daysLabel, formatDate, formatMoney } from "../components/ui";
+import { Alert, Empty, ExternalLink, Field, Loading, PageHeader, Pagination, ReviewBadge, daysLabel, formatDate, formatMoney } from "../components/ui";
 import { Icon } from "../icons";
 
 export function FundingCard({ item, compact = false }) {
@@ -31,7 +31,7 @@ export function FundingCard({ item, compact = false }) {
           <Icon name="calendar" size={14} />
           {item.deadline ? `${formatDate(item.deadline)} (${daysLabel(item.days_left)})` : "Rolling / no deadline"}
         </span>
-        {item.url && <a href={item.url} target="_blank" rel="noreferrer">Details<Icon name="external" size={14} /></a>}
+        <ExternalLink href={item.url}>Details<Icon name="external" size={14} /></ExternalLink>
       </div>
     </article>
   );
